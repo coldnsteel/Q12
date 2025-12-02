@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Q12 Agent Accumulation Report</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0d1117; }
+        .card { background-color: #161b22; border: 1px solid #30363d; }
+        .score-70 { background-color: #37d67a; color: #101010; }
+        .score-50 { background-color: #f7b300; color: #101010; }
+        .score-0 { background-color: #484f58; }
+        /* Custom Keyframe for subtle pulse on the score */
+        @keyframes pulse-strong {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(55, 214, 122, 0.7); }
+            50% { box-shadow: 0 0 10px 5px rgba(55, 214, 122, 0); }
+        }
+        .pulse-strong { animation: pulse-strong 2s infinite; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <!-- Application Header -->
+    <header class="flex flex-col md:flex-row items-center justify-between p-4 mb-8 card rounded-xl shadow-lg">
+        <!-- SVG Icon: Magnifying Glass on Dollar Sign -->
+        <a href="https://github.com/Ark0N/AI-Code-Executor" target="_blank" class="flex items-center space-x-3 mb-4 md:mb-0 transition duration-300 hover:text-green-400 hover:scale-105">
+            <div class="w-12 h-12 relative flex items-center justify-center">
+                <!-- Dollar Bill/Magnified View (SVG) -->
+                <svg viewBox="0 0 100 100" class="w-full h-full">
+                    <!-- Base Dollar Sign $ -->
+                    <text x="35" y="65" font-size="40" font-weight="bold" fill="#37d67a">$</text>
+                    <!-- Magnifying Glass Circle -->
+                    <circle cx="65" cy="40" r="30" stroke="#f7b300" stroke-width="6" fill="none"/>
+                    <!-- Magnifying Glass Handle -->
+                    <path d="M 85 60 L 100 75" stroke="#f7b300" stroke-width="6" fill="none" stroke-linecap="round"/>
+                    <!-- Inside the Magnifying Glass: Large Dollar Bill Texture/Detail -->
+                    <g transform="translate(65, 40) rotate(-15)">
+                        <rect x="-15" y="-15" width="30" height="30" fill="#37d67a" opacity="0.1"/>
+                        <line x1="-12" y1="-12" x2="12" y2="12" stroke="#37d67a" stroke-width="1.5" opacity="0.8"/>
+                        <line x1="-12" y1="12" x2="12" y2="-12" stroke="#37d67a" stroke-width="1.5" opacity="0.8"/>
+                    </g>
+                </svg>
+            </div>
+            <h1 class="text-3xl font-extrabold text-white tracking-tight">Q12 Accumulation Agent</h1>
+        </a>
+
+        <!-- Repository Link / Status -->
+        <div class="text-right">
+            <p class="text-sm text-gray-400">Analysis Date: Dec 2, 2025</p>
+            <a href="https://github.com/Ark0N/AI-Code-Executor" target="_blank" class="text-blue-400 hover:text-blue-300 font-medium text-sm transition duration-300">
+                View Source Code on GitHub →
+            </a>
+        </div>
+    </header>
+
+    <!-- Report Title and Instructions -->
+    <div class="mb-6">
+        <h2 class="text-2xl font-bold text-white mb-2">Pre-Earnings Institutional Accumulation Report</h2>
+        <p class="text-gray-400">Stocks flagged for institutional "drip-feed" accumulation during the 12 weeks leading into their earnings announcements (Score ≥ 50).</p>
+    </div>
+
+    <!-- MOCK DATA: STRONG ACCUMULATION CANDIDATE -->
+    <div class="card p-6 rounded-xl mb-6 shadow-xl">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-700 pb-4 mb-4">
+            <h3 class="text-4xl font-extrabold text-white tracking-wide">NVTS</h3>
+            <div class="mt-2 md:mt-0 flex items-center space-x-3">
+                <span class="text-lg font-medium text-gray-300">TTE: 4.2 Weeks</span>
+                <span class="score-70 px-4 py-1 rounded-full text-xl font-bold pulse-strong">
+                    SCORE 85
+                </span>
+            </div>
+        </div>
+        
+        <p class="text-2xl font-semibold text-green-400 mb-4">Classification: Strong Accumulation</p>
+
+        <!-- Signal Breakdown -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-gray-800 p-4 rounded-lg">
+                <p class="font-bold text-white mb-2">Behavioral Signals (Weighted & Time-Decayed)</p>
+                <ul class="text-gray-300 text-sm space-y-1">
+                    <li class="flex justify-between"><span>Incremental Accumulation:</span> <span class="text-green-300">Score 40 (Strong Recent Drip 3/5)</span></li>
+                    <li class="flex justify-between"><span>Short Interest Drop:</span> <span class="text-green-300">Score 20 (SIR drop 0.18)</span></li>
+                    <li class="flex justify-between"><span>ML Anomaly Bonus:</span> <span class="text-yellow-300">+10 Bonus</span></li>
+                </ul>
+            </div>
+
+            <div class="bg-gray-800 p-4 rounded-lg">
+                <p class="font-bold text-white mb-2">Fundamental & Insider Signals</p>
+                <ul class="text-gray-300 text-sm space-y-1">
+                    <li class="flex justify-between"><span>Insider Buys (Form 4):</span> <span class="text-green-300">Score 15 (2 P-Buys by Directors)</span></li>
+                    <li class="flex justify-between"><span>13F Institutional Change:</span> <span class="text-green-300">Score 15 (Increase vs. prior Q)</span></li>
+                    <li class="flex justify-between"><span>News Proxy (Contracts/Govt):</span> <span class="text-yellow-300">Score 10 (2 relevant news hits)</span></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="mt-6">
+            <p class="text-lg font-medium text-white border-t border-gray-700 pt-4">Visualization Placeholder</p>
+            <div class="h-32 bg-gray-700 mt-2 rounded-lg flex items-center justify-center text-gray-400">
+                [Matplotlib Chart Image Placeholder: Volume & ATR Chart for NVTS]
+            </div>
+        </div>
+    </div>
+    
+    <!-- MOCK DATA: MODERATE ACCUMULATION CANDIDATE -->
+    <div class="card p-6 rounded-xl mb-6 shadow-md">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-gray-700 pb-4 mb-4">
+            <h3 class="text-4xl font-extrabold text-white tracking-wide">SFT</h3>
+            <div class="mt-2 md:mt-0 flex items-center space-x-3">
+                <span class="text-lg font-medium text-gray-300">TTE: 8.9 Weeks</span>
+                <span class="score-50 px-4 py-1 rounded-full text-xl font-bold">
+                    SCORE 55
+                </span>
+            </div>
+        </div>
+        
+        <p class="text-xl font-semibold text-yellow-300 mb-4">Classification: Moderate Accumulation</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-gray-800 p-4 rounded-lg">
+                <p class="font-bold text-white mb-2">Key Signals</p>
+                <ul class="text-gray-300 text-sm space-y-1">
+                    <li class="flex justify-between"><span>Incremental Accumulation:</span> <span class="text-green-300">Score 20 (Sustained Drip 7/15)</span></li>
+                    <li class="flex justify-between"><span>Insider Buys (Form 4):</span> <span class="text-green-300">Score 15 (1 CFO Buy)</span></li>
+                    <li class="flex justify-between"><span>13F Institutional Change:</span> <span class="text-green-300">Score 15 (Increase vs. prior Q)</span></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
