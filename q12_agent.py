@@ -10,6 +10,7 @@ from sklearn.ensemble import IsolationForest
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import nltk
 import matplotlib.pyplot as plt
+import json
 
 # --- CONFIGURATION (MUST BE REPLACED WITH ACTUAL KEYS) ---
 POLYGON_KEY = 'your_polygon_key'
@@ -26,7 +27,7 @@ try:
     # Ensure VADER is downloaded for sentiment analysis
     try:
         nltk.data.find('sentiment/vader_lexicon')
-    except nltk.downloader.DownloadError:
+    except LookupError:
         nltk.download('vader_lexicon')
     sia = SentimentIntensityAnalyzer()
 except Exception as e:
@@ -91,14 +92,14 @@ def get_next_earnings(ticker):
 
 def build_universe(max_price=25, min_volume=100000) -> list:
     """Builds the target universe using Polygon SIC code filtering and snapshot checks."""
-    sic_codes = '3674,7371,7372,3571'
+    sic_codes = '3674,7371,7372,3571'  # Semiconductors, Software, Computers
     keywords = ['AI', 'SENSOR', 'MIDDLEWARE', 'DEFENSE', 'MACHINE LEARNING', 'CLOUD', 'DATA']
     curated = ['SOUN', 'NRDY', 'BBAI', 'REKR', 'INOD', 'NVTS', 'AEYE', 'HLLY', 'SFT', 'CGNT', 'PLTR']
 
     sic_tickers = []
     
     try:
-        # Fetching a broad list using SIC codes
+        # Fetch broad list using SIC codes (efficient filtering at source)
         tickers_by_sic = list(client.list_tickers(
             market='stocks', 
             sic_code_in=sic_codes, 
@@ -106,37 +107,39 @@ def build_universe(max_price=25, min_volume=100000) -> list:
             limit=1000
         ))
         
-        # Filtering by description keywords as a final check
+        # Filter by description keywords for AI relevance
         for t in tickers_by_sic:
             desc = t.name.upper() if t.name else ""
             if any(k in desc for k in keywords):
-                 sic_tickers.append(t.ticker)
+                sic_tickers.append(t.ticker)
                  
     except Exception as e:
         print(f"Error fetching SIC tickers from Polygon: {e}")
+        # Fallback to curated if API fails
+        return curated
 
     all_tickers = list(set(curated + sic_tickers))
 
-    # Filter by Price and Liquidity (Batch Snapshot)
+    # Filter by Price and Liquidity (Batch Snapshot for efficiency)
     cheap_liquid_tickers = []
-    chunk_size = 250
+    chunk_size = 250  # Optimal for Polygon's limits
+    import time
     for i in range(0, len(all_tickers), chunk_size):
         chunk = all_tickers[i:i + chunk_size]
         try:
             snapshots = client.get_snapshot_all('stocks', tickers=','.join(chunk))
             
             for snap in snapshots:
-                # Use snap.session.close for current price
-                # Use snap.session.volume for current daily liquidity check
-                if (snap.session.close is not None and snap.session.close <= max_price and 
-                    snap.session.volume is not None and snap.session.volume >= min_volume):
+                # Check current close price and daily volume
+                if (hasattr(snap.session, 'close') and snap.session.close <= max_price and 
+                    hasattr(snap.session, 'volume') and snap.session.volume >= min_volume):
                     cheap_liquid_tickers.append(snap.ticker)
             
-            time.sleep(1) # Respect API rate limits
+            time.sleep(1)  # Rate limit buffer
             
         except Exception as e:
             print(f"Error fetching snapshot for chunk: {e}")
-            time.sleep(5) 
+            time.sleep(5)  # Backoff on error
 
     return cheap_liquid_tickers
 
@@ -343,23 +346,27 @@ def run_q12():
                 'classification': classification,
                 'signals': {k: {key: v for key, v in val.items() if key != 'df'} for k, val in signals.items()},
                 'ml_bonus': ml_bonus,
-                'earnings_date': edate_str
+                'earnings_date': edate_str,
+                'tte_weeks': tte_weeks
             })
 
-    # Final Report Output
+    # Final Report Output (Console)
     print("\n--- Q12 Agent Scan Report ---")
     if results:
         results = sorted(results, key=lambda x: x['score'], reverse=True)
         for res in results:
             print(f"\n[{res['classification']}] {res['ticker']} (Score: {res['score']})")
-            print(f"  Earnings Date: {res['earnings_date']} (TTE: {tte_weeks:.1f} Weeks)")
+            print(f"  Earnings Date: {res['earnings_date']} (TTE: {res['tte_weeks']:.1f} Weeks)")
             print(f"  ML Bonus: +{res['ml_bonus']}")
             for sig_name, sig_data in res['signals'].items():
-                 print(f"  - {sig_name.capitalize()}: Score {sig_data['score']}, Flags: {', '.join(sig_data['flags'])}")
+                print(f"  - {sig_name.capitalize()}: Score {sig_data['score']}, Flags: {', '.join(sig_data['flags'])}")
             print(f"  Chart saved to {os.path.join(OUTPUT_DIR, f'{res['ticker']}_volume.png')}")
     else:
         print("No stocks flagged for accumulation in the current universe.")
 
+    # Save JSON for dynamic HTML report
+    with open('latest_report.json', 'w') as f:
+        json.dump(results, f, indent=4)
+
 if __name__ == '__main__':
     run_q12()
-
