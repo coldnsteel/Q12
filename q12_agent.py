@@ -1,16 +1,15 @@
 import pandas as pd
 import numpy as np
-import requests
+import aiohttp
+import asyncio
 import datetime
 import os
 import scipy.stats
-from polygon import RESTClient
-from sec_api import InsiderTradingApi, ThirteenFApi
 from sklearn.ensemble import IsolationForest
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import nltk
 import matplotlib.pyplot as plt
-import json
+from sec_api import InsiderTradingApi, ThirteenFApi  # Still sync; wrapped in to_thread
 
 # --- CONFIGURATION (MUST BE REPLACED WITH ACTUAL KEYS) ---
 POLYGON_KEY = 'your_polygon_key'
@@ -19,9 +18,8 @@ FINNHUB_KEY = 'your_finnhub_key'
 SEC_KEY = 'your_sec_key'
 OUTPUT_DIR = 'q12_reports'
 
-# Initialize Clients
+# Initialize Sync Clients (SEC is sync)
 try:
-    client = RESTClient(POLYGON_KEY)
     insider_api = InsiderTradingApi(SEC_KEY)
     thirteenf_api = ThirteenFApi(SEC_KEY)
     # Ensure VADER is downloaded for sentiment analysis
@@ -53,7 +51,7 @@ def compute_obv(df):
     df['obv'] = df['obv'].fillna(0)
     return df
 
-def get_next_earnings(ticker):
+async def get_next_earnings(ticker):
     """
     PRIORITY WRAPPER: Gets the next earnings date using Finnhub, 
     falling back to Alpha Vantage if Finnhub fails.
@@ -61,36 +59,39 @@ def get_next_earnings(ticker):
     today = datetime.date.today().isoformat()
     future = (datetime.date.today() + datetime.timedelta(days=90)).isoformat()
 
-    # 1. Try Finnhub (Preferred)
-    try:
-        url = f'https://finnhub.io/api/v1/calendar/earnings?symbol={ticker}&from={today}&to={future}&token={FINNHUB_KEY}'
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json().get('earningsCalendar', [])
-            if data and 'date' in data[0]:
-                return data[0]['date']
-    except Exception as e:
-        print(f"Finnhub failed for {ticker}: {e}. Falling back to Alpha Vantage.")
+    async with aiohttp.ClientSession() as session:
+        # 1. Try Finnhub (Preferred)
+        try:
+            url = f'https://finnhub.io/api/v1/calendar/earnings?symbol={ticker}&from={today}&to={future}&token={FINNHUB_KEY}'
+            async with session.get(url, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    calendar = data.get('earningsCalendar', [])
+                    if calendar and 'date' in calendar[0]:
+                        return calendar[0]['date']
+        except Exception as e:
+            print(f"Finnhub failed for {ticker}: {e}. Falling back to Alpha Vantage.")
 
-    # 2. Try Alpha Vantage (Fallback)
-    try:
-        alpha_url = f'https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&symbol={ticker}&horizon=3month&apikey={ALPHA_KEY}'
-        alpha_resp = requests.get(alpha_url, timeout=5)
-        if alpha_resp.status_code == 200:
-            lines = alpha_resp.content.decode('utf-8').splitlines()
-            if len(lines) > 1:
-                # Assuming CSV structure
-                data = pd.read_csv(pd.io.common.StringIO(alpha_resp.text))
-                if not data.empty and 'reportDate' in data.columns:
-                    return data['reportDate'].iloc[0]
-    except Exception as e:
-        print(f"Alpha Vantage failed for {ticker}: {e}")
+        # 2. Try Alpha Vantage (Fallback)
+        try:
+            alpha_url = f'https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&symbol={ticker}&horizon=3month&apikey={ALPHA_KEY}'
+            async with session.get(alpha_url, timeout=5) as resp:
+                if resp.status == 200:
+                    content = await resp.text()
+                    lines = content.splitlines()
+                    if len(lines) > 1:
+                        # Assuming CSV structure
+                        data = pd.read_csv(pd.io.common.StringIO(content))
+                        if not data.empty and 'reportDate' in data.columns:
+                            return data['reportDate'].iloc[0]
+        except Exception as e:
+            print(f"Alpha Vantage failed for {ticker}: {e}")
 
     return None
 
 # --- 2. UNIVERSE BUILDING ---
 
-def build_universe(max_price=25, min_volume=100000) -> list:
+async def build_universe(max_price=25, min_volume=100000) -> list:
     """Builds the target universe using Polygon SIC code filtering and snapshot checks."""
     sic_codes = '3674,7371,7372,3571'  # Semiconductors, Software, Computers
     keywords = ['AI', 'SENSOR', 'MIDDLEWARE', 'DEFENSE', 'MACHINE LEARNING', 'CLOUD', 'DATA']
@@ -98,48 +99,51 @@ def build_universe(max_price=25, min_volume=100000) -> list:
 
     sic_tickers = []
     
-    try:
-        # Fetch broad list using SIC codes (efficient filtering at source)
-        tickers_by_sic = list(client.list_tickers(
-            market='stocks', 
-            sic_code_in=sic_codes, 
-            active=True, 
-            limit=1000
-        ))
-        
-        # Filter by description keywords for AI relevance
-        for t in tickers_by_sic:
-            desc = t.name.upper() if t.name else ""
-            if any(k in desc for k in keywords):
-                sic_tickers.append(t.ticker)
+    async with aiohttp.ClientSession() as session:
+        try:
+            # Fetch broad list using SIC codes (efficient filtering at source)
+            url = f'https://api.polygon.io/v3/reference/tickers?market=stocks&sic_code.in={sic_codes}&active=true&limit=1000&apiKey={POLYGON_KEY}'
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    tickers_by_sic = data.get('results', [])
+                    
+                    # Filter by description keywords for AI relevance
+                    for t in tickers_by_sic:
+                        desc = t.get('name', '').upper()
+                        if any(k in desc for k in keywords):
+                            sic_tickers.append(t['ticker'])
                  
-    except Exception as e:
-        print(f"Error fetching SIC tickers from Polygon: {e}")
-        # Fallback to curated if API fails
-        return curated
+        except Exception as e:
+            print(f"Error fetching SIC tickers from Polygon: {e}")
+            # Fallback to curated if API fails
+            return curated
 
     all_tickers = list(set(curated + sic_tickers))
 
     # Filter by Price and Liquidity (Batch Snapshot for efficiency)
     cheap_liquid_tickers = []
     chunk_size = 250  # Optimal for Polygon's limits
-    import time
     for i in range(0, len(all_tickers), chunk_size):
         chunk = all_tickers[i:i + chunk_size]
         try:
-            snapshots = client.get_snapshot_all('stocks', tickers=','.join(chunk))
+            url = f'https://api.polygon.io/v3/snapshot?limit=250&ticker.any_of={",".join(chunk)}&apiKey={POLYGON_KEY}'
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    snapshots = data.get('results', [])
+                    for snap in snapshots:
+                        session_data = snap.get('session', {})
+                        # Check current close price and daily volume
+                        if 'close' in session_data and session_data['close'] <= max_price and \
+                           'volume' in session_data and session_data['volume'] >= min_volume:
+                            cheap_liquid_tickers.append(snap['ticker'])
             
-            for snap in snapshots:
-                # Check current close price and daily volume
-                if (hasattr(snap.session, 'close') and snap.session.close <= max_price and 
-                    hasattr(snap.session, 'volume') and snap.session.volume >= min_volume):
-                    cheap_liquid_tickers.append(snap.ticker)
-            
-            time.sleep(1)  # Rate limit buffer
+            await asyncio.sleep(1)  # Rate limit buffer
             
         except Exception as e:
             print(f"Error fetching snapshot for chunk: {e}")
-            time.sleep(5)  # Backoff on error
+            await asyncio.sleep(5)  # Backoff on error
 
     return cheap_liquid_tickers
 
@@ -164,60 +168,75 @@ def detect_accumulation(df):
     flags = ["Strong Recent (3/5)" if last5 else "Sustained (7/15)" if last15 else ""]
     return {'score': score, 'flags': flags, 'df': df} # Return DF for ML later
 
-def detect_short_drop(ticker, start_date, end_date, df):
+async def detect_short_drop(ticker, start_date, end_date, df):
     """Detects SIR drop >= 15% with flat price action."""
-    shorts = list(client.list_short_interest(ticker, date_gte=start_date, limit=10))
-    if len(shorts) < 2: return {'score': 0, 'flags': []}
-    
-    shorts = sorted(shorts, key=lambda s: s.settlement_date, reverse=True)
-    current = shorts[0]; prev = shorts[1]
-    drop_ratio = (prev.days_to_cover - current.days_to_cover) / prev.days_to_cover if prev.days_to_cover > 0 else 0
-    
-    # Check price flat (price change < 5% between settlement dates)
-    period_start = datetime.date.fromisoformat(prev.settlement_date)
-    period_end = datetime.date.fromisoformat(current.settlement_date)
-    df_period = df[(df['timestamp'] >= period_start) & (df['timestamp'] <= period_end)]
-    
-    price_flat = True
-    if not df_period.empty and df_period['close'].iloc[0] > 0:
-        price_change = abs(df_period['close'].iloc[-1] - df_period['close'].iloc[0]) / df_period['close'].iloc[0]
-        price_flat = price_change < 0.05
-    
-    if drop_ratio >= 0.15 and price_flat:
-        return {'score': 20, 'flags': [f'SIR drop {drop_ratio:.2f}']}
-    return {'score': 0, 'flags': []}
+    async with aiohttp.ClientSession() as session:
+        try:
+            url = f'https://api.polygon.io/v1/short_interest/{ticker}?date.gte={start_date}&limit=10&apiKey={POLYGON_KEY}'
+            async with session.get(url, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    shorts = data.get('results', [])
+                    if len(shorts) < 2: return {'score': 0, 'flags': []}
+                    
+                    shorts = sorted(shorts, key=lambda s: s['settlement_date'], reverse=True)
+                    current = shorts[0]; prev = shorts[1]
+                    drop_ratio = (prev['days_to_cover'] - current['days_to_cover']) / prev['days_to_cover'] if prev['days_to_cover'] > 0 else 0
+                    
+                    # Check price flat (price change < 5% between settlement dates)
+                    period_start = datetime.date.fromisoformat(prev['settlement_date'])
+                    period_end = datetime.date.fromisoformat(current['settlement_date'])
+                    df_period = df[(df['timestamp'] >= period_start) & (df['timestamp'] <= period_end)]
+                    
+                    price_flat = True
+                    if not df_period.empty and df_period['close'].iloc[0] > 0:
+                        price_change = abs(df_period['close'].iloc[-1] - df_period['close'].iloc[0]) / df_period['close'].iloc[0]
+                        price_flat = price_change < 0.05
+                    
+                    if drop_ratio >= 0.15 and price_flat:
+                        return {'score': 20, 'flags': [f'SIR drop {drop_ratio:.2f}']}
+                    return {'score': 0, 'flags': []}
+        except Exception as e:
+            print(f"Error in short interest for {ticker}: {e}")
+            return {'score': 0, 'flags': []}
 
-def detect_insider_buys(ticker, start_date):
-    """Detects net open-market buys by insiders (Form 4)."""
-    data = insider_api.get_data({'symbol': ticker, 'from': start_date})
+async def detect_insider_buys(ticker, start_date):
+    """Detects net open-market buys by insiders (Form 4). Wrapped sync call."""
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, lambda: insider_api.get_data({'symbol': ticker, 'from': start_date}))
     buys = [trade for trade in data if trade['transactionType'] == 'P-Purchase']
     score = 15 if len(buys) > 0 else 0
     flags = [f"{len(buys)} P-Buys"] if score > 0 else []
     return {'score': score, 'flags': flags}
 
-def detect_13f_increase(ticker):
-    """Detects increase in institutional holdings vs. prior quarter."""
-    filings = thirteenf_api.get_filings(ticker)
+async def detect_13f_increase(ticker):
+    """Detects increase in institutional holdings vs. prior quarter. Wrapped sync call."""
+    loop = asyncio.get_running_loop()
+    filings = await loop.run_in_executor(None, lambda: thirteenf_api.get_filings(ticker))
     if len(filings) < 2: return {'score': 0, 'flags': []}
     increase = filings[-1]['holdings'] > filings[-2]['holdings']
     score = 15 if increase else 0
     flags = ["13F Increase"] if increase else []
     return {'score': score, 'flags': flags}
 
-def detect_news_proxy(ticker, start_date):
+async def detect_news_proxy(ticker, start_date):
     """Detects positive news with foreign/AI contract keywords."""
     # Prioritizing Finnhub for summaries/headlines
     end_date = datetime.date.today().isoformat()
     url = f'https://finnhub.io/api/v1/company-news?symbol={ticker}&from={start_date}&to={end_date}&token={FINNHUB_KEY}'
     
-    try:
-        resp = requests.get(url, timeout=5)
-        news_data = resp.json()
-        summaries = [n['summary'] or n['headline'] for n in news_data if 'summary' in n or 'headline' in n]
-    except:
-        # Fallback to Polygon
-        news = list(client.list_ticker_news(ticker=ticker, published_utc_gte=start_date, limit=50))
-        summaries = [n.description or n.title for n in news if n.description or n.title]
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, timeout=5) as resp:
+                news_data = await resp.json()
+                summaries = [n['summary'] or n['headline'] for n in news_data if 'summary' in n or 'headline' in n]
+        except:
+            # Fallback to Polygon
+            polygon_url = f'https://api.polygon.io/v2/reference/news?ticker={ticker}&published_utc.gte={start_date}&limit=50&apiKey={POLYGON_KEY}'
+            async with session.get(polygon_url, timeout=5) as resp:
+                data = await resp.json()
+                news = data.get('results', [])
+                summaries = [n['description'] or n['title'] for n in news if 'description' in n or 'title' in n]
     
     keywords = ["CFIUS", "foreign partnership", "AI contract", "trusted intermediary layer", "sensor infrastructure", "government contract", "AI deployment", "fulfillment contract", "large-scale deployment"]
     positive_news = [s for s in summaries if any(kw.lower() in s.lower() for kw in keywords) and sia.polarity_scores(s)['compound'] > 0.1]
@@ -276,71 +295,67 @@ def compute_total_score(signals, tte_weeks, ml_bonus):
     total = min(base + ml_bonus, 100)
     return total
 
-def run_q12():
-    """Main Q12 Agent pipeline execution."""
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    universe = build_universe()
-    today = datetime.date.today()
-    results = []
+class Q12Agent:
+    async def get_data(self, ticker, start, end):
+        """Async data fetch for aggregates using aiohttp (replaces sync Polygon client)."""
+        async with aiohttp.ClientSession() as session:
+            url = f'https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{start}/{end}?limit=200&apiKey={POLYGON_KEY}'
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    aggs = data.get('results', [])
+                    if not aggs or len(aggs) < 60: return None
+                    df = pd.DataFrame(aggs)
+                    df.rename(columns={'t': 'timestamp', 'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'}, inplace=True)
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms').dt.date
+                    df = df.sort_values(by='timestamp').reset_index(drop=True)
+                    return df
+                else:
+                    print(f"Error fetching aggregates for {ticker}: {resp.status}")
+                    return None
 
-    for ticker in universe:
-        edate_str = get_next_earnings(ticker)
-        if edate_str is None: continue
+    async def get_signals(self, ticker):
+        """Async method to get signals for a single ticker."""
+        edate_str = await get_next_earnings(ticker)
+        if edate_str is None: return None
         
         try:
+            today = datetime.date.today()
             edate = datetime.date.fromisoformat(edate_str)
             tte_weeks = (edate - today).days / 7
-            
-            # Filter to the 12-week window (0 to 12 weeks)
-            if not (0 < tte_weeks <= 12): continue
+            if not (0 < tte_weeks <= 12): return None
         except ValueError:
-            continue
+            return None
             
         start = (today - datetime.timedelta(weeks=12)).isoformat()
         
-        # 1. Fetch Aggregates
-        try:
-            aggs = list(client.list_aggs(ticker, 1, 'day', start, today.isoformat(), limit=200))
-            if not aggs or len(aggs) < 60: continue # Need enough data for 12 weeks
-        except Exception as e:
-            print(f"Error fetching Polygon aggregates for {ticker}: {e}")
-            continue
-
-        # Prepare DataFrame
-        df = pd.DataFrame([a.__dict__ for a in aggs])
-        df.rename(columns={'t': 'timestamp', 'o': 'open', 'h': 'high', 'l': 'low', 'c': 'close', 'v': 'volume'}, inplace=True)
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms').dt.date
-        df = df.sort_values(by='timestamp').reset_index(drop=True)
+        df = await self.get_data(ticker, start, today.isoformat())
+        if df is None: return None
         
-        # 2. Compute Signals
         accum_result = detect_accumulation(df.copy())
         signals = {
             'accum': accum_result,
-            'short': detect_short_drop(ticker, start, today.isoformat(), df.copy()),
-            'insider': detect_insider_buys(ticker, start),
-            '13f': detect_13f_increase(ticker),
-            'news': detect_news_proxy(ticker, start)
+            'short': await detect_short_drop(ticker, start, today.isoformat(), df.copy()),
+            'insider': await detect_insider_buys(ticker, start),
+            '13f': await detect_13f_increase(ticker),
+            'news': await detect_news_proxy(ticker, start)
         }
         
-        # 3. ML Bonus
         ml_bonus = ml_anomaly(accum_result['df'].copy())
         
-        # 4. Scoring
         score = compute_total_score(signals, tte_weeks, ml_bonus)
         
-        # 5. Output
         classification = "Strong Accumulation" if score >= 70 else "Moderate Accumulation" if score >= 50 else "No Accumulation"
         
         if classification != "No Accumulation":
-            
             # Generate Chart (Volume)
             fig, ax = plt.subplots(figsize=(10, 4))
             df.plot(x='timestamp', y='volume', ax=ax, title=f'{ticker} Volume - TTE: {tte_weeks:.1f} Weeks')
             ax.axhline(df['volume'].tail(60).mean() * 1.10, color='r', linestyle='--', label='1.1x Avg Vol')
             plt.savefig(os.path.join(OUTPUT_DIR, f'{ticker}_volume.png'))
             plt.close()
-
-            results.append({
+            
+            return {
                 'ticker': ticker,
                 'score': score,
                 'classification': classification,
@@ -348,25 +363,34 @@ def run_q12():
                 'ml_bonus': ml_bonus,
                 'earnings_date': edate_str,
                 'tte_weeks': tte_weeks
-            })
+            }
+        return None
 
-    # Final Report Output (Console)
-    print("\n--- Q12 Agent Scan Report ---")
-    if results:
-        results = sorted(results, key=lambda x: x['score'], reverse=True)
-        for res in results:
-            print(f"\n[{res['classification']}] {res['ticker']} (Score: {res['score']})")
-            print(f"  Earnings Date: {res['earnings_date']} (TTE: {res['tte_weeks']:.1f} Weeks)")
-            print(f"  ML Bonus: +{res['ml_bonus']}")
-            for sig_name, sig_data in res['signals'].items():
-                print(f"  - {sig_name.capitalize()}: Score {sig_data['score']}, Flags: {', '.join(sig_data['flags'])}")
-            print(f"  Chart saved to {os.path.join(OUTPUT_DIR, f'{res['ticker']}_volume.png')}")
-    else:
-        print("No stocks flagged for accumulation in the current universe.")
+    async def scan(self):
+        """Main async Q12 Agent scan."""
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        universe = await build_universe()
+        today = datetime.date.today()
+        
+        # Concurrent fetching with gather
+        tasks = [self.get_signals(ticker) for ticker in universe]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Filter valid results
+        valid_results = [r for r in results if r is not None and not isinstance(r, Exception)]
+        
+        # Final Report Output (Console)
+        print("\n--- Q12 Agent Scan Report ---")
+        if valid_results:
+            valid_results = sorted(valid_results, key=lambda x: x['score'], reverse=True)
+            for res in valid_results:
+                print(f"\n[{res['classification']}] {res['ticker']} (Score: {res['score']})")
+                print(f"  Earnings Date: {res['earnings_date']} (TTE: {res['tte_weeks']:.1f} Weeks)")
+                print(f"  ML Bonus: +{res['ml_bonus']}")
+                for sig_name, sig_data in res['signals'].items():
+                    print(f"  - {sig_name.capitalize()}: Score {sig_data['score']}, Flags: {', '.join(sig_data['flags'])}")
+                print(f"  Chart saved to {os.path.join(OUTPUT_DIR, f'{res['ticker']}_volume.png')}")
+        else:
+            print("No stocks flagged for accumulation in the current universe.")
 
-    # Save JSON for dynamic HTML report
-    with open('latest_report.json', 'w') as f:
-        json.dump(results, f, indent=4)
-
-if __name__ == '__main__':
-    run_q12()
+        return valid_results
