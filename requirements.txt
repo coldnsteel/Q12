@@ -1,24 +1,12 @@
-# Q12 Institutional Accumulation Agent Dependencies
-
-# Core Data Handling
-pandas>=1.3.0
-numpy>=1.21.0
-
-# API Clients
+fastapi
+uvicorn
+python-dotenv
+aiohttp
+pandas
+numpy
+scipy
+scikit-learn
+nltk
+matplotlib
 sec-api
-requests>=2.26.0
-aiohttp  # Added for async I/O
-
-# Technical Analysis & Scientific Computing
-scipy>=1.7.0
-matplotlib>=3.4.0
-
-# Machine Learning Anomaly Detection
-scikit-learn>=1.0.0
-
-# Natural Language Processing & Sentiment Analysis
-nltk>=3.6.0
-
-# Async Framework (implicit via Python, but for clarity)
-fastapi  # If not already, for the service
-uvicorn  # To run FastAPI
+requests
