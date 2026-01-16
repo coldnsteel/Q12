@@ -101,3 +101,4 @@ async def signals_for_ticker(ticker: str) -> Optional[Dict[str, Any]]:
         # We don't want to expose raw API errors, but log them
         print(f"Error fetching signals for {ticker}: {e}")
         raise HTTPException(status_code=500, detail="Internal error during signal computation.")
+
