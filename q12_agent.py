@@ -12,10 +12,10 @@ import matplotlib.pyplot as plt
 from sec_api import InsiderTradingApi, ThirteenFApi  # Still sync; wrapped in to_thread
 
 # --- CONFIGURATION (MUST BE REPLACED WITH ACTUAL KEYS) ---
-POLYGON_KEY = 'SVdsUFcCf5716nN98OldTcoTvRjzvaLB '
-ALPHA_KEY = '7WRT16ZU4RWNYUNZ'
-FINNHUB_KEY = 'd52r899r01qggm5thqsgd52r899r01qggm5thqt0'
-SEC_KEY = '3fe5d479a6287c9f7b582ee93d02f9173c71099a5e0c2cca7cfb3cbad4ab3f1a'
+PPOLYGON_KEY = os.getenv ('SVdsUFcCf5716nN98OldTcoTvRjzvaLB ')
+ALPHA_KEY = os.getenv ('7WRT16ZU4RWNYUNZ')
+FINNHUB_KEY = os.getenv ('d52r899r01qggm5thqsgd52r899r01qggm5thqt0')
+SEC_KEY = os.getenv ('3fe5d479a6287c9f7b582ee93d02f9173c71099a5e0c2cca7cfb3cbad4ab3f1a')
 OUTPUT_DIR = 'q12_reports'
 
 # Initialize Sync Clients (SEC is sync)
