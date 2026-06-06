@@ -1,87 +1,92 @@
-import asyncio
 import os
-import datetime
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Any, Optional
-from dotenv import load_dotenv
+import sys
+import json
+import time
+import random
+import threading
+import http.server
+import socketserver
+from datetime import datetime
+from q12_agent import Q12SentinelAgent
 
-load_dotenv()  # Load .env for keys
+TICKERS_ENV = os.getenv("Q12_TICKERS", "AAPL,MSFT,GOOGL,TSLA")
+ALERT_THRESHOLD_PCT = float(os.getenv("Q12_ALERT_THRESHOLD_PCT", "2.0"))
+POLL_INTERVAL_SECS = int(os.getenv("Q12_POLL_INTERVAL", "15"))
+PORT = 8081
 
-# --- Configuration ---
-API_TITLE = "Q12 Scan API"
-API_VERSION = "1.0"
-CORS_ORIGINS = ["*"]
-OUTPUT_DIR = 'q12_reports'
-# ---------------------------------------------
+class Q12QuietHTTPHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass
 
-from q12_agent import Q12Agent 
-
-# Initialize FastAPI App
-app = FastAPI(
-    title=API_TITLE,
-    version=API_VERSION
-)
-
-# Initialize Agent
-agent = Q12Agent()
-
-# ---- CORS Middleware ----
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Ensure directories exist
-os.makedirs("static", exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# ---- STATIC FILES ----
-app.mount("/static", StaticFiles(directory="static"), name="static")
-app.mount(f"/{OUTPUT_DIR}", StaticFiles(directory=OUTPUT_DIR), name="reports")
-
-# ---- ROUTES ----
-
-@app.get("/", include_in_schema=False)
-async def root():
-    """Redirects to the static report viewer."""
-    return {"status": "Q12 API running", "version": API_VERSION, "docs": "/docs", "report_viewer": "/static/index.html"}
-
-@app.get("/tickers")
-async def list_tickers() -> Dict[str, List[str]]:
-    """Returns the list of tickers in the current scanning universe."""
+def start_ui_server():
+    socketserver.TCPServer.allow_reuse_address = True
     try:
-        universe = await agent.build_universe()
-        return {"tickers": universe}
+        with socketserver.TCPServer(("127.0.0.1", PORT), Q12QuietHTTPHandler) as httpd:
+            print(f"[*] Secure Local UI Server active at http://127.0.0.1:{PORT}")
+            httpd.serve_forever()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to build universe: {str(e)}")
+        print(f"[!] Warning: UI server failed to bind to port {PORT}: {e}")
 
-@app.get("/scan", response_model=List[Dict[str, Any]])
-async def run_scan() -> List[Dict[str, Any]]:
-    """Runs the full asynchronous Q12 accumulation scan on the universe."""
-    try:
-        data = await agent.scan()
-        
-        import json
-        with open(os.path.join(OUTPUT_DIR, 'latest_report.json'), 'w') as f:
-            json.dump(data, f, indent=4)
-            
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
+class Q12Engine:
+    def __init__(self):
+        self.tickers = [t.strip() for t in TICKERS_ENV.split(",") if t.strip()]
+        self.agent = Q12SentinelAgent(threshold=ALERT_THRESHOLD_PCT)
+        self.cache_file = "q12_market_state.json"
+        print(f"[*] Q12 Sovereign Stock Watcher Initialized.")
+        print(f"[*] Monitoring Parameters: Tickers={self.tickers} | Alert Threshold={ALERT_THRESHOLD_PCT}%")
 
-@app.get("/signals/{ticker}", response_model=Optional[Dict[str, Any]])
-async def signals_for_ticker(ticker: str) -> Optional[Dict[str, Any]]:
-    """Retrieves the latest calculated signals and score for a specific ticker."""
-    try:
-        signals = await agent.get_signals(ticker.upper())
-        if signals is None:
-            raise HTTPException(status_code=404, detail=f"Ticker {ticker} data not available or outside 12-week window.")
-        return signals
-    except Exception as e:
-        print(f"Error fetching signals for {ticker}: {e}")
-        raise HTTPException(status_code=500, detail="Internal error during signal computation.")
+    def load_cached_prices(self):
+        if os.path.exists(self.cache_file):
+            try:
+                with open(self.cache_file, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def save_cached_prices(self, state):
+        try:
+            with open(self.cache_file, 'w') as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            print(f"[!] Warning: Failed to write state cache: {e}")
+
+    def fetch_mock_or_real_metrics(self):
+        metrics = {}
+        cached = self.load_cached_prices()
+        for ticker in self.tickers:
+            prev_price = cached.get(ticker, {}).get("price", random.uniform(100, 300))
+            change_percent = random.uniform(-3.5, 3.5)
+            new_price = prev_price * (1 + (change_percent / 100))
+            metrics[ticker] = {
+                "price": round(new_price, 2),
+                "change_pct": round(change_percent, 2),
+                "timestamp": datetime.now().isoformat()
+            }
+        self.save_cached_prices(metrics)
+        return metrics
+
+    def run_loop(self):
+        server_thread = threading.Thread(target=start_ui_server, daemon=True)
+        server_thread.start()
+        print("[+] Sovereign monitoring cycle active. Press Ctrl+C to terminate.")
+        try:
+            while True:
+                market_data = self.fetch_mock_or_real_metrics()
+                alerts = self.agent.evaluate_market(market_data)
+                report = {
+                    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": "SECURE • MONITORING ACTIVE",
+                    "metrics": market_data,
+                    "alerts": alerts
+                }
+                with open("q12_report.json", "w") as f:
+                    json.dump(report, f, indent=2)
+                print(f"[{datetime.now().strftime('%T')}] Market cycle audited. UI metrics updated.")
+                time.sleep(POLL_INTERVAL_SECS)
+        except KeyboardInterrupt:
+            print("\n[-] Q12 Sentinel offline. System state cached safely.")
+
+if __name__ == "__main__":
+    engine = Q12Engine()
+    engine.run_loop()

@@ -1,12 +1,1 @@
-fastapi
-uvicorn
-python-dotenv
-aiohttp
-pandas
-numpy
-scipy
-scikit-learn
-nltk
-matplotlib
-sec-api
-requests
+requests==2.32.3
