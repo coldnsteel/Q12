@@ -1,11 +1,4 @@
-import os
-import sys
-import json
-import time
-import random
-import threading
-import http.server
-import socketserver
+import os, sys, json, time, random, threading, http.server, socketserver
 from datetime import datetime
 from q12_agent import Q12SentinelAgent
 
@@ -15,8 +8,7 @@ POLL_INTERVAL_SECS = int(os.getenv("Q12_POLL_INTERVAL", "15"))
 PORT = 8081
 
 class Q12QuietHTTPHandler(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, format, *args):
-        pass
+    def log_message(self, format, *args): pass
 
 def start_ui_server():
     socketserver.TCPServer.allow_reuse_address = True
@@ -33,23 +25,18 @@ class Q12Engine:
         self.agent = Q12SentinelAgent(threshold=ALERT_THRESHOLD_PCT)
         self.cache_file = "q12_market_state.json"
         print(f"[*] Q12 Sovereign Stock Watcher Initialized.")
-        print(f"[*] Monitoring Parameters: Tickers={self.tickers} | Alert Threshold={ALERT_THRESHOLD_PCT}%")
 
     def load_cached_prices(self):
         if os.path.exists(self.cache_file):
             try:
-                with open(self.cache_file, 'r') as f:
-                    return json.load(f)
-            except Exception:
-                pass
+                with open(self.cache_file, "r") as f: return json.load(f)
+            except: pass
         return {}
 
     def save_cached_prices(self, state):
         try:
-            with open(self.cache_file, 'w') as f:
-                json.dump(state, f, indent=2)
-        except Exception as e:
-            print(f"[!] Warning: Failed to write state cache: {e}")
+            with open(self.cache_file, "w") as f: json.dump(state, f, indent=2)
+        except Exception as e: pass
 
     def fetch_mock_or_real_metrics(self):
         metrics = {}
@@ -67,6 +54,18 @@ class Q12Engine:
         return metrics
 
     def run_loop(self):
+        print("[*] Generating initial telemetry sync frame...")
+        market_data = self.fetch_mock_or_real_metrics()
+        alerts = self.agent.evaluate_market(market_data)
+        report = {
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "status": "SECURE • MONITORING ACTIVE",
+            "metrics": market_data,
+            "alerts": alerts
+        }
+        with open("q12_report.json", "w") as f:
+            json.dump(report, f, indent=2)
+
         server_thread = threading.Thread(target=start_ui_server, daemon=True)
         server_thread.start()
         print("[+] Sovereign monitoring cycle active. Press Ctrl+C to terminate.")
@@ -82,10 +81,10 @@ class Q12Engine:
                 }
                 with open("q12_report.json", "w") as f:
                     json.dump(report, f, indent=2)
-                print(f"[{datetime.now().strftime('%T')}] Market cycle audited. UI metrics updated.")
+                print(f"[{datetime.now().strftime("%T")}]: Sync written.")
                 time.sleep(POLL_INTERVAL_SECS)
         except KeyboardInterrupt:
-            print("\n[-] Q12 Sentinel offline. System state cached safely.")
+            print("\n[-] Q12 Sentinel offline.")
 
 if __name__ == "__main__":
     engine = Q12Engine()
